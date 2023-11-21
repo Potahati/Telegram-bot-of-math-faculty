@@ -1,0 +1,333 @@
+from aiogram import Bot, Dispatcher, executor
+from t import TOKEN, admin_id
+from aiogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, \
+    ReplyKeyboardMarkup,KeyboardButton, ReplyKeyboardRemove, CallbackQuery
+from get_data import get_data, get_prefix, get_books_name, \
+    get_subjects_for_num, get_all_links_for_subject
+from dictionary import d_subjects
+from aiogram.dispatcher import FSMContext
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
+from t import chat_for_books_id
+from aiogram.utils.callback_data import CallbackData
+from aiogram.dispatcher.filters.state import StatesGroup, State
+from math import ceil
+d = dict()
+
+
+def make_murkup(prefix:str, lst_link:str):
+    markup = InlineKeyboardMarkup(row_width=3)
+    for i in range(len(lst_link)):
+        markup.insert(InlineKeyboardButton(text=f'{i+1}', callback_data=f'{prefix[i]}'))
+    global d
+    d = dict(zip(prefix, lst_link))
+    return markup
+
+
+def make_temp_murkup(subjects_num_sem_copy, n):            # функция, прикрепляющая inline-кнопки к сообщению(не больше 30 смиволов!)
+    markup = InlineKeyboardMarkup(row_width=3)
+    for i in range(len(subjects_num_sem_copy)):
+        if subjects_num_sem_copy[i] == 'компьютерная геометрия и геометрическое моделирование':             #обходим ограничение на длину callback_data
+            subjects_num_sem_copy[i] = 'кгигм'
+        elif subjects_num_sem_copy[i] == 'топология и дифференциальная геометрия':             #обходим ограничение на длину callback_data
+            subjects_num_sem_copy[i] = 'топология'
+        elif subjects_num_sem_copy[i] == 'дифференциальные уравнения в моделировании гистерезисных элементов':
+            subjects_num_sem_copy[i] ='гистерезис'
+        elif subjects_num_sem_copy[i] == 'устойчивость решений дифференциальных уравнений':
+            subjects_num_sem_copy[i] = 'устойчивость'
+        elif subjects_num_sem_copy[i] == 'методика преподавания физико - математических дисциплин':
+            subjects_num_sem_copy[i] = 'методика фм'
+        elif subjects_num_sem_copy[i] == 'математические модели физических процессов':
+            subjects_num_sem_copy[i] = 'ммфп'
+        elif subjects_num_sem_copy[i] == 'разрешимость нелинейных уравнений':
+            subjects_num_sem_copy[i] = 'рну'
+        markup.insert(InlineKeyboardButton(text=f'{i + 1}', callback_data=f'#{n}{subjects_num_sem_copy[i]}'))    #присылаем пользоваетелю список предметов в семестре
+    return markup
+
+max_count_page = 0
+def markup_start_list(result, count):
+    markup = InlineKeyboardMarkup(row_width=1)
+    dict_size = ceil(len(result) / 7)
+    global max_count_page
+    max_count_page = dict_size - 1
+    first_point = 0
+    step = 7
+    items = dict()
+    for i in range(dict_size):
+        items[i] = result[first_point:step]
+        first_point = step
+        step += 7
+    result = items[count]
+    for i in range(len(result)):
+        if result[i] == 'компьютерная геометрия и геометрическое моделирование':             #обходим ограничение на длину callback_data
+            temp = 'кгигм'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'топология и дифференциальная геометрия':             #обходим ограничение на длину callback_data
+            temp = 'топология'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'дифференциальные уравнения в моделировании гистерезисных элементов':
+            temp = 'гистерезис'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'устойчивость решений дифференциальных уравнений':
+            temp= 'устойчивость'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'методика преподавания физико - математических дисциплин':
+            temp = 'методика фм'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'математические модели физических процессов':
+            temp = 'ммфп'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        elif result[i] == 'разрешимость нелинейных уравнений':
+            temp = 'рну'
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{temp}'))
+        else:
+            markup.insert(InlineKeyboardButton(text=f'{result[i].capitalize()}', callback_data=f'%{result[i]}'))
+
+    if count != 0 and count != max_count_page:
+        markup.row(InlineKeyboardButton(text='⬅', callback_data=f'page_back{count}'), InlineKeyboardButton(text='➡',
+                                                                                callback_data=f'page_next{count}'))
+    elif count == 0:
+        markup.row(InlineKeyboardButton(text='➡', callback_data=f'page_next{count}'))
+    elif count == max_count_page:
+        markup.row(InlineKeyboardButton(text='⬅', callback_data=f'page_back{count}'))
+    return markup
+
+
+bot = Bot(TOKEN)
+dp = Dispatcher(bot, storage=MemoryStorage())
+storage = MemoryStorage()
+
+@dp.callback_query_handler(text_startswith="#")            #хендлер для обработки markup по поиску семестра
+async def send_markup(call:CallbackQuery):
+    num_sem = call.data[1]
+    subject = call.data[2:]
+    prefix = ""
+    lst_link = []
+    if subject == 'кгигм':
+        subject = 'компьютерная геометрия и геометрическое моделирование'
+    elif subject == 'топология':
+        subject = 'топология и дифференциальная геометрия'
+    elif subject == 'гистерезис':
+        subject = 'дифференциальные уравнения в моделировании гистерезисных элементов'
+    elif subject == 'устойчивость':
+        subject = 'устойчивость решений дифференциальных уравнений'
+    elif subject == "методика фм":
+        subject = 'методика преподавания физико - математических дисциплин'
+    elif subject == 'ммфп':
+        subject = 'математические модели физических процессов'
+    elif subject == 'рну':
+        subject = 'разрешимость нелинейных уравнений'
+    prefix = get_prefix(subject, num_sem)
+    lst_link = get_data(subject, num_sem)
+    books_name = get_books_name(subject, num_sem)
+    for i in range(len(books_name)):
+        books_name[i]=f'{i+1}. ' + books_name[i]
+    string = ""
+    head = f'✅Найдены следующие материалы {num_sem} - го семестра по предмету "{subject.capitalize()}":\n\n'
+    string = '\n \n'.join(books_name)
+    await bot.send_message(call.from_user.id, head + string, reply_markup=make_murkup(prefix, lst_link))
+    await call.answer()
+
+@dp.callback_query_handler(text_startswith="%")     #обработчик кнопко по общего списка(при старте)
+async def send_start_list(call:CallbackQuery):
+    subject = call.data[1:]
+    if subject == 'кгигм':
+        subject = 'компьютерная геометрия и геометрическое моделирование'
+    elif subject == 'топология':
+        subject = 'топология и дифференциальная геометрия'
+    elif subject == 'гистерезис':
+        subject = 'дифференциальные уравнения в моделировании гистерезисных элементов'
+    elif subject == 'устойчивость':
+        subject = 'устойчивость решений дифференциальных уравнений'
+    elif subject == 'методика фм':
+        subject = 'методика преподавания физико - математических дисциплин'
+    elif subject == 'ммфп':
+       subject = 'математические модели физических процессов'
+    elif subject == 'рну':
+        subject = 'разрешимость нелинейных уравнений'
+    name_books_for_name_subj = get_all_links_for_subject(subject)[0]
+    code_of_books = get_all_links_for_subject(subject)[1]
+    links_of_books = get_all_links_for_subject(subject)[2]  # функция возвращает список списков
+    if len(name_books_for_name_subj) != 0:
+        await call.message.reply(f'✅Найдены следующие материалы по дисциплине "{subject.capitalize()}" :')
+        for i in range(len(name_books_for_name_subj)):
+            name_books_for_name_subj[i] = f'{i + 1}. ' + name_books_for_name_subj[i]
+        out = '\n \n'.join(name_books_for_name_subj)  # строковая константа для хранения названия учебников
+
+        await call.message.answer(out, reply_markup=make_murkup(code_of_books, links_of_books))
+    await call.answer()
+
+
+@dp.callback_query_handler(text_startswith='page_')
+async def pagination_on_markup(call:CallbackQuery):
+    global max_count_page
+    count = int(call.data[-1])
+    call.data = call.data[:-1]
+    if count == 0 and call.data == 'page_back':
+        count = 0
+    elif count == max_count_page and call.data == 'page_next':
+        count = max_count_page
+    else:
+        if call.data == 'page_next':
+            count += 1
+        elif call.data == 'page_back':
+            count -= 1
+    await call.message.edit_reply_markup(reply_markup=markup_start_list(result, count))
+    await call.answer()
+
+@dp.callback_query_handler()
+async def send_doc(call:CallbackQuery):
+    for key in d:
+        if call.data == key:
+            await bot.send_document(call.from_user.id, document=d[key])
+            await call.answer('Документ отправлен')
+    await call.answer()
+
+
+
+result = []
+@dp.message_handler(commands=['start', 'show_subject_list'])         #ставим фильтр на обработку команды start
+async def send_hello(message:Message):
+    global result
+    #определяем асинхронную функцию
+    string = ""
+    if message.text == '/start':
+        string = 'Здравствуйте!Напишите номер семеcтра либо название предмета. \n Бот найдет учебники по предметам из списка👇'
+    elif message.text == '/show_subject_list':
+        string = 'Вам доступны материалы по следующим дисциплинам👇'
+    subjects = []
+    for i in range(1, 9):
+        subjects.append(get_subjects_for_num(i))
+    result = []
+
+    for el in subjects:
+        for j in el:
+            if j != None and j not in result:
+                result.append(j)
+    result = sorted(result)
+    await message.answer(string, reply_markup=markup_start_list(result, 0))
+
+
+    # вывод сообщения в чат с пользователем
+
+@dp.message_handler(commands=['help'])
+async def send_help(message:Message):
+    await message.reply('Введите название предмета либо номер семестра без кавычек.\nПример:\nматематический анализ \n '
+                         'Название предмета можно сокращать:матан, умф.')
+
+@dp.message_handler(commands=['search_by_semester_number'])
+async def send_subj_search_semestr(message:Message):
+    await message.reply('Введите номер семестра. Материалы доступны с 1-8 семестр включительно.\nПример запроса:\n1 ')
+
+@dp.message_handler(commands=['search_by_subject_name'])
+async def send_sub_search_sub(message:Message):
+    await message.reply('Введите название предмета\n Пример запроса:\nалгебра ')
+
+@dp.message_handler(commands=['report_an_error'])
+async def send_an_error(message:Message):
+    await message.reply('Спасибо, что нашли ошибку и решили о ней сообщить. Напишите, пожалуйста: @danil_ladyzhev')
+
+
+@dp.message_handler(text=['1','2','3','4','5','6','7','8'])         #задали фильтр на поле text объекта message
+async def send_subj_cont(message:Message):
+    n = int(message.text)                                           #номер семестра
+    subjects_num_sem = get_subjects_for_num(n)                      #получение списка пердметов семестра № n
+    subjects_num_sem_copy = get_subjects_for_num(n)
+    for j in range(len(subjects_num_sem)):                          #формирование списка предметов согласну извлеченной из базы данных инфомарции
+        subjects_num_sem[j] = f"{j+1}.  " + subjects_num_sem[j].capitalize()
+    temp = '\n \n'.join(subjects_num_sem)
+    await message.answer('Поиск по номеру семестра🕗')
+    await message.reply(f'✅Найдены следующие дисциплины {n} - го семестра :')
+    await message.answer(temp, reply_markup=make_temp_murkup(subjects_num_sem_copy, n))        #прикрепление клавиатуры с выбором предмета к сформарованному списку предметов
+
+
+@dp.message_handler(content_types=['document'])
+async def echo(message:Message):
+    if message.from_user.id == admin_id:
+        await message.reply(message.document.file_id)
+    else:
+        await message.delete()
+    #await message.answer(message)
+    #await message.forward(chat_id=chat_for_books_id)
+
+
+class Get_File(StatesGroup):
+    get_file = State()
+
+
+@dp.message_handler(commands=['suggest_books'])
+async def echo_suggest(message: Message):
+    await Get_File.get_file.set()
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb_2 = KeyboardButton('Выйти из раздела')
+    kb.add( kb_2)
+    await message.answer('Прикрепите, пожалуйста, документ. \n Подпишите его в формате:'
+                         ' Название учебника, название предмета, номер семестра и  автор.\n \n  '
+                         'Пример: Линейные пространства, Алгебра, 1 семестр,  Турбин М.В. Если не хотите загружать файл,'
+                         ' то нажмите "Выйти из раздела" ', reply_markup=kb)
+
+
+@dp.message_handler(state=Get_File.get_file, content_types=['document'])
+async def forward(message:Message, state:FSMContext):
+    try:
+        await message.forward(chat_id=chat_for_books_id)
+        await state.finish()
+        await message.answer('Учебник отправлен на проверку.')
+    except:
+        await message.answer('Вы пытаетесь прислать файл не в том формате.'
+                             ' Попробуйте прислать документ в формате pdf. Если вы хотите выйти'
+                             ' из режима загрузки - нажмите на "Выйти из раздела" ')
+
+
+@dp.message_handler(text=['Выйти из раздела'], state=Get_File.get_file)
+async def exit_func(message:Message, state:FSMContext):
+    await state.finish()
+    await message.answer('Вы вышли из раздела.')
+
+
+@dp.message_handler(state=Get_File.get_file)
+async def forward_book(message:Message, state:FSMContext):
+    try:
+        await bot.send_document(chat_id=chat_for_books_id, document=message.document.file_id)
+        await message.answer('Пожалуйста, прикрепите документ или выйдите из раздела.')
+    except:
+        await message.answer('Вы пытаетесь прислать файл не в том формате. Попробуйте прислать документ в формате pdf.'
+                             ' Если вы хотите выйти'
+                             ' из режима загрузки - нажмите на "Выйти из раздела" ')
+
+@dp.message_handler()
+async def send_book(message:Message):
+   subject = message.text.lower().split()
+   subject = ' '.join(subject)
+   bol = False
+   for key in d_subjects:
+       if subject == key:
+           subject = d_subjects[key]
+           #bol = True
+   await message.answer('Поиск по названию предмета🕗')
+   name_books_for_name_subj = get_all_links_for_subject(subject)[0]
+   code_of_books = get_all_links_for_subject(subject)[1]
+   links_of_books =  get_all_links_for_subject(subject)[2] # функция возвращает список списков
+   if len(name_books_for_name_subj) != 0:
+       await message.reply(f'✅Найдены следующие материалы по дисциплине "{subject.capitalize()}" :')
+       for i in range(len(name_books_for_name_subj)):
+           name_books_for_name_subj[i] = f'{i + 1}. ' + name_books_for_name_subj[i]
+       out = '\n \n'.join(name_books_for_name_subj)             #строковая константа для хранения названия учебников
+
+       await message.answer(out, reply_markup=make_murkup(code_of_books,links_of_books))
+   else:
+       lst_type_error = []
+       for key in d_subjects:
+           if subject[:3] in key and d_subjects[key] not in lst_type_error:
+               lst_type_error.append(d_subjects[key])
+       errors_suggest = ', '.join(lst_type_error)
+       await message.answer(f'❌По вашему запросу ничего не найдено.')
+       if len(lst_type_error)  == 1:
+           await message.answer('Возможно, вы искали:')
+           await message.answer(errors_suggest)
+       elif len(lst_type_error) > 1:
+           await message.answer('Возможно, вы искали:')
+           for i in range(len(lst_type_error)):
+               await message.answer(f'{lst_type_error[i]}')
+
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
